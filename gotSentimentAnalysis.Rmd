@@ -277,9 +277,10 @@ got_summary <- got_afinn %>%
     mean_score = mean(value),
     median_score = median(value)
   )
+got_summary
 ```
 
-The mean and median indicate *slightly* positive overall sentiments based on the AFINN lexicon. 
+The mean and median indicate *slightly* negative overall sentiments based on the AFINN lexicon. 
 
 ### NRC lexicon for sentiment analysis
 
@@ -288,6 +289,7 @@ We can use the NRC lexicon to start "binning" text by the feelings they're typic
 ```{r bind-bing}
 got_nrc <- got_stop %>% 
   inner_join(get_sentiments("nrc"))
+got_nrc
 ```
 
 Wait, won't that exclude some of the words in our text? YES! We should check which are excluded using `anti_join()`:
