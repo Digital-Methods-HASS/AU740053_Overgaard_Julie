@@ -1,0 +1,247 @@
+---
+title: "Mckay"
+author: "Julie Overgaard"
+date: "2024-04-22"
+output: html_document
+---
+
+## Setting up the right packages:
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+library(tidyverse)
+library(here)
+
+# For text mining:
+library(pdftools)
+library(tidytext)
+library(textdata) 
+library(ggwordcloud)
+
+dir.create("data4")
+
+```
+
+## Getting the Mckay pdf text:
+
+```{r}
+mckay <- pdf_text('data4/Merry Wiesner-Hanks & Patricia Buckley Ebrey & Roger Beck & Jerry Davila & Clare Crowston & John P. McKay - A History of World Societies, Combined-Bedford Books (2017).pdf')
+mckay_df <- data.frame(text = mckay) %>% 
+  mutate(page = 1:n())
+
+mckay_text <- mckay_df %>% 
+  filter(page %in% 1:20) %>% 
+  mutate(text = str_split(text, '\n')) %>% 
+  unnest(text)
+```
+
+## Focus on chapter 14
+-Setting it up so mckay_ch14 contains mckays chapter 14 about the Middle ages 
+```{r}
+mckay_ch14 <- mckay[845:906]
+```
+
+### Some wrangling:
+- Split up pages into separate lines (separated by `\n`) using `stringr::str_split()`
+- Unnest into regular columns using `tidyr::unnest()`
+- Remove leading/trailing white space with `stringr::str_trim()`
+
+```{r}
+mckay_df <- data.frame(mckay_ch14) %>% 
+  mutate(text_full1 = str_split(mckay_ch14, pattern = '\n')) %>% 
+  unnest(text_full1) %>% 
+  mutate(text_full1 = str_trim(text_full1))
+view(mckay_df)
+```
+
+Now each line, on each page, is its own row, with extra starting & trailing spaces removed. 
+
+### Get the tokens (individual words) in tidy format
+
+Use `tidytext::unnest_tokens()` (which pulls from the `tokenizer`) package, to split columns into tokens. We are interested in *words*, so that's the token we'll use:
+
+```{r}
+mckay_tokens <- mckay_df %>% 
+  unnest_tokens(word, text_full1)
+```
+
+## Counting the words
+```{r}
+mckay_wc <- mckay_tokens %>% 
+  count(word) %>% 
+  arrange(-n)
+mckay_wc
+```
+
+## Removing stop words
+
+```{r}
+mckay_stop <- mckay_tokens %>% 
+  anti_join(stop_words) %>% 
+  select(-mckay_ch14)
+```
+
+## Counting with the stop words
+
+```{r}
+mckay_swc <- mckay_stop %>% 
+  count(word) %>% 
+  arrange(-n)
+mckay_swc
+```
+
+## Creating a word cloud
+
+```{r}
+length(unique(mckay_stop$word))
+## 3455 unique words
+
+## Getting the top 100 words
+mckay_top100 <- mckay_stop %>% 
+  count(word) %>% 
+  arrange(-n) %>% 
+  head(100)
+mckay_top100
+```
+
+```{r}
+mckay_cloud <- ggplot(data = mckay_top100, aes(label = word)) +
+  geom_text_wordcloud() +
+  theme_minimal()
+mckay_cloud
+```
+
+## Customizing the cloud
+
+```{r}
+ggplot(data = mckay_top100, aes(label = word, size = n)) +
+  geom_text_wordcloud_area(aes(color = n), shape = "diamond") +
+  scale_size_area(max_size = 12) +
+  scale_color_gradientn(colors = c("darkgreen","blue","red")) +
+  theme_minimal()
+```
+
+## Sentiment Analysis - aflinn
+-The AFINN lexicon assigns words with a score that runs between -5 and 5, with negative scores indicating negative sentiment and positive scores indicating positive sentiment.
+-"afinn": Words ranked from -5 (very negative) to +5 (very positive)
+
+First, bind words in `mckay_stop` to `afinn` lexicon:
+```{r}
+mckay_afinn <- mckay_stop %>% 
+  inner_join(get_sentiments("afinn"))
+mckay_afinn
+```
+Let's find some counts (by sentiment ranking):
+```{r}
+mckay_afinn_hist <- mckay_afinn %>% 
+  count(value)
+
+# Plot them: 
+ggplot(data = mckay_afinn_hist, aes(x = value, y = n)) +
+  geom_col()
+```
+
+Looking closer on some of the negative words (-2)
+```{r}
+mckay_afinn2 <- mckay_afinn %>% 
+  filter(value == -2) %>% 
+  head(50)
+mckay_afinn2
+```
+
+
+```{r}
+# Check the unique 2-score words:
+unique(mckay_afinn2$word)
+
+# Count & plot them
+mckay_afinn2_n <- mckay_afinn2 %>% 
+  count(word, sort = TRUE) %>% 
+  mutate(word = fct_reorder(factor(word), n))
+
+
+ggplot(data = mckay_afinn2_n, aes(x = word, y = n)) +
+  geom_col() +
+  coord_flip()
+```
+
+Summarize sentiment
+-Mean =
+-Median =
+```{r}
+mckay_summary <- mckay_afinn %>% 
+  summarize(
+    mean_score = mean(value),
+    median_score = median(value)
+  )
+mckay_summary
+```
+-The mean and median indicate *slightly* positive overall sentiments based on the AFINN lexicon. 
+
+## Sentiment analysis - nrc
+-The nrc lexicon categorizes words in a binary fashion (“yes”/“no”) into categories of positive, negative, anger, anticipation, disgust, fear, joy, sadness, surprise, and trust.
+-We can use the NRC lexicon to start "binning" text by the feelings they're typically associated with. As above, we'll use inner_join() to combine the idig non-stopword text with the nrc lexicon: 
+
+```{r}
+mckay_nrc <- mckay_stop %>% 
+  inner_join(get_sentiments("nrc"))
+mckay_nrc
+```
+Wait, won't that exclude some of the words in our text? YES! We should check which are excluded using `anti_join()`:
+
+```{r}
+mckay_exclude <- mckay_stop %>% 
+  anti_join(get_sentiments("nrc"))
+
+# View(mckay_exclude)
+
+# Count to find the most excluded:
+mckay_exclude_n <- mckay_exclude %>% 
+  count(word, sort = TRUE)
+
+head(mckay_exclude_n)
+```
+
+Counts
+```{r}
+mckay_nrc_n <- mckay_nrc %>% 
+  count(sentiment, sort = TRUE)
+
+# And plot them:
+
+ggplot(data = mckay_nrc_n, aes(x = sentiment, y = n)) +
+  geom_col()
+```
+
+Or count by sentiment *and* word, then facet:
+```{r}
+mckay_nrc_n5 <- mckay_nrc %>% 
+  count(word,sentiment, sort = TRUE) %>% 
+  group_by(sentiment) %>% 
+  top_n(5) %>% 
+  ungroup()
+
+mckay_nrc_gg <- ggplot(data = mckay_nrc_n5, aes(x = reorder(word,n), y = n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, ncol = 2, scales = "free") +
+  coord_flip() +
+  theme_minimal() +
+  labs(x = "Word", y = "count")
+
+# Show it
+mckay_nrc_gg
+
+# Save it
+ggsave(plot = mckay_nrc_gg, 
+       here("figures","mckay_nrc_sentiment.png"), 
+       height = 8, 
+       width = 5)
+```
+## Big picture takeaway
+
+There are serious limitations of sentiment analysis using existing lexicons, and you should **think really hard** about your findings and if a lexicon makes sense for your study. Otherwise, word counts and exploration alone can be useful! 
+
+### Credits: 
+This tutorial is inspired by Allison Horst's Advanced Statistics and Data Analysis.
